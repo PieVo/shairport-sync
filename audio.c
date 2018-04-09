@@ -51,6 +51,9 @@ extern audio_output audio_dummy;
 #ifdef CONFIG_PIPE
 extern audio_output audio_pipe;
 #endif
+#ifdef CONFIG_HTTP
+extern audio_output audio_pipe;
+#endif
 #ifdef CONFIG_STDOUT
 extern audio_output audio_stdout;
 #endif
