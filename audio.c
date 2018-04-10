@@ -52,7 +52,7 @@ extern audio_output audio_dummy;
 extern audio_output audio_pipe;
 #endif
 #ifdef CONFIG_HTTP
-extern audio_output audio_pipe;
+extern audio_output audio_http;
 #endif
 #ifdef CONFIG_STDOUT
 extern audio_output audio_stdout;
@@ -76,6 +76,9 @@ static audio_output *outputs[] = {
 #endif
 #ifdef CONFIG_PIPE
     &audio_pipe,
+#endif
+#ifdef CONFIG_HTTP
+    &audio_http,
 #endif
 #ifdef CONFIG_STDOUT
     &audio_stdout,
