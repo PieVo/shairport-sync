@@ -50,8 +50,8 @@ if USE_PIPE
 shairport_sync_SOURCES += audio_pipe.c
 endif
 
-if USE_HTTP
-shairport_sync_SOURCES += audio_http.c
+if USE_WAVSTREAM
+shairport_sync_SOURCES += audio_wavstream.c
 endif
 
 if USE_DUMMY

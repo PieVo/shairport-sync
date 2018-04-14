@@ -1,5 +1,5 @@
 /*
- * HTTP output driver. This file is part of Shairport.
+ * WAVstream output driver. This file is part of Shairport.
  * Copyright (c) James Laird 2013, PieVo 2018
  * All rights reserved.
  *
