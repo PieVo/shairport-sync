@@ -80,8 +80,8 @@ AM_CONDITIONAL([USE_STDOUT], [test "x$with_stdout" = "xyes" ])
 AC_ARG_WITH([pipe],[  --with-pipe = include the pipe audio back end ],[ AC_MSG_RESULT(>>Including the pipe audio back end)  AC_DEFINE([CONFIG_PIPE], 1, [Needed by the compiler.]) ], )
 AM_CONDITIONAL([USE_PIPE], [test "x$with_pipe" = "xyes" ])
 
-AC_ARG_WITH([http],[  --with-http = include the http audio back end ],[ AC_MSG_RESULT(>>Including the http audio back end)  AC_DEFINE([CONFIG_HTTP], 1, [Needed by the compiler.]) ], )
-AM_CONDITIONAL([USE_HTTP], [test "x$with_http" = "xyes" ])
+AC_ARG_WITH([wavstream],[  --with-wavstream = include the wavstream audio back end ],[ AC_MSG_RESULT(>>Including the wavstream audio back end)  AC_DEFINE([CONFIG_WAVSTREAM], 1, [Needed by the compiler.]) ], )
+AM_CONDITIONAL([USE_WAVSTREAM], [test "x$with_wavstream" = "xyes" ])
 
 # Check to see if we should include the System V initscript
 

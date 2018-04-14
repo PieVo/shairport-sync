@@ -40,18 +40,15 @@
 #include <linux/socket.h>
 #include <netinet/tcp.h>
 
-// TODO: Make configurable via configfile
-#define AUDIO_HTTP_PORT 5600
-#define TCP_MAX_LEN 256
+#define AUDIO_HTTP_PORT 5668
 
 static pthread_t tcp_thread;
-
 static int client_socket = -1;
 static int client_connected = 0;
 static int server_socket = 0;
 static int stop_accept_thread = 0;
-char *pipename = NULL;
 int warned = 0;
+int wavstream_port = AUDIO_HTTP_PORT;
 
 int tcp_open(int port, int *sock)
 {
@@ -64,6 +61,7 @@ int tcp_open(int port, int *sock)
     debug(1, "error opening socket");
     goto error;
   }
+
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -73,7 +71,7 @@ int tcp_open(int port, int *sock)
      sizeof(serv_addr)) < 0) {
      debug(1, "error binding");
      goto error;
-   }
+  }
 
   ret = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(flag));
   if (ret < 0) {
@@ -81,7 +79,7 @@ int tcp_open(int port, int *sock)
    goto error;
   }
 
-  listen(sockfd, 0);
+  listen(sockfd, 3);
   ret = 0;
   *sock = sockfd;
 
@@ -89,46 +87,12 @@ error:
   return ret;
 }
 
-int tcp_read(int socket, char *buffer, size_t count)
-{
-  int ret = -1;
-
-  do {
-    ret = read(socket, buffer, count);
-    if (ret == 0) {
-      /* client disconnected */
-      ret = -EPIPE;
-      goto error;
-    } else
-    
-    if (ret == -1) {
-      if (errno == EINTR) {
-        /* interrupted system call, try again */
-        ret = 0;
-        } else {
-          goto error;
-        }
-    } else if (ret > 0) {
-      count -= ret;
-      buffer += ret;
-    }
-  } while (count > 0);
-
-  ret = 0;
-error:
-  return ret;
-}
-
 int tcp_write(int socket, const char *buf, unsigned int size)
 {
   int ret;
-  int count;
-  char *ptr;
+  int count = size;
+  char *ptr = (char*)buf;
 
-  ptr = (char*)buf;
-  count = size;
-
-  //debug(1, "TCP write: size=%d, msg=%s", count, buf);
   do {
     ret = send(socket, buf, count, MSG_NOSIGNAL);
     if (ret == -1)
@@ -143,11 +107,11 @@ int tcp_write(int socket, const char *buf, unsigned int size)
 int tcp_open_socket(void)
 {
   int ret, srv_socket;
-  /* Open our server side socket, retry for ever */
+  // Open our server side socket, retry for ever
   do {
-    ret = tcp_open(AUDIO_HTTP_PORT, &srv_socket);
+    ret = tcp_open(wavstream_port, &srv_socket);
     if (ret < 0)    {
-      debug(1, "failed to open socket, sleeping for 5 seconds\n");
+      debug(1, "failed to open socket, retrying in 5 seconds\n");
       sleep(5);
     }
   } while (ret < 0);
@@ -157,20 +121,7 @@ int tcp_open_socket(void)
 
 static void start(__attribute__((unused)) int sample_rate,
                   __attribute__((unused)) int sample_format) {
-#if 0
-  // this will leave fd as -1 if a reader hasn't been attached
-  fd = open(pipename, O_WRONLY | O_NONBLOCK);
-  if ((fd < -1) && (warned == 0)) {
-    warn("Error %d opening the pipe named \"%s\".", errno, pipename);
-    warned = 1;
-  }
-  // Check if a client is connected
-  if (client_socket <= 0)
-  {
-    debug(1, "no client connected");
-    return;
-  }
-#endif
+  debug(1, "wavstream start");
 }
 
 static void play(short buf[], int samples) {
@@ -190,19 +141,19 @@ static void play(short buf[], int samples) {
   if ((rc < 0) && (warned == 0)) {
     strerror_r(errno, (char *)errorstring, 1024);
     warn("Error %d writing to the client socket: %s", errno, errorstring);
-    warned = 1;
+    warned = 0;
     client_connected = 0;
   }
 }
 
 static void stop(void) {
-  // Don't close the pipe just because a play session has stopped.
-  //  if (fd > 0)
-  //    close(fd);
+  debug(1, "wavstream stop");
 }
 
-void send_wav_header(void)
+int send_wav_header(void)
 {
+  int ret;
+
   // Send WAV header
   typedef struct wave_header
   {
@@ -222,7 +173,7 @@ void send_wav_header(void)
 
   wavfile_t wavhdr = {
     "RIFF",
-    2048, /* (2048*1024*1024) - 9, */
+    ~0,
     "WAVEfmt ",
     16,
     1,
@@ -232,21 +183,39 @@ void send_wav_header(void)
     4,
     16,
     "data",
-    2048, /*(2048*1024*1024) - 1 */
+    ~0,
   };
 
-  tcp_write(client_socket, (char*)&wavhdr, sizeof(wavhdr));
+  ret = tcp_write(client_socket, (char*)&wavhdr, sizeof(wavhdr));
+  if (ret != 0) {
+    debug(1, "Failed to write WAVE header to socket");
+  }
+  return ret;
+}
+
+int send_http_ok(void) {
+  char http_msg[256];
+  int offs = 0;
+
+  // Send HTTP reply
+  offs  = sprintf(http_msg, "HTTP/1.1 200 OK\r\n");
+  offs += sprintf(http_msg + offs, "Cache-Control: no-cache\r\n");
+  offs += sprintf(http_msg + offs, "Content-Type: audio/x-wav\r\n");
+  offs += sprintf(http_msg + offs, "Accept-Ranges: none\r\n");
+  offs += sprintf(http_msg + offs, "Content-length: 4294967296\r\n");
+  offs += sprintf(http_msg + offs, "\r\n");
+  
+  return tcp_write(client_socket, http_msg, strlen(http_msg));
 }
 
 void *accept_thread(void *dummy)
 {
   struct sockaddr_in cli_addr;
   socklen_t clilen = sizeof(cli_addr);
-  //int client_socket = 0;
-  char http_msg[256];
 
   server_socket = tcp_open_socket();
-  debug(1, "tcp accept thread started");
+  debug(1, "http_audio thread started, listening on port %d", wavstream_port);
+
   while(!stop_accept_thread) {
     client_socket = accept(server_socket,(struct sockaddr *)&cli_addr, &clilen);
     if (client_socket < 0) {
@@ -254,31 +223,25 @@ void *accept_thread(void *dummy)
       break;
     }
     debug(1, "new http audio client connected, client socket %d", client_socket);
-    // Dump what client has to say
 
-    // Send HTTP reply
-    snprintf(http_msg, sizeof(http_msg), "HTTP/1.1 200 OK\n");
-    tcp_write(client_socket, http_msg, strlen(http_msg));
-    snprintf(http_msg, sizeof(http_msg), "Content-length: 100000000\n");
-    tcp_write(client_socket, http_msg, strlen(http_msg));
-    snprintf(http_msg, sizeof(http_msg), "Content-Type: audio/x-wav\n\n");
-    tcp_write(client_socket, http_msg, strlen(http_msg));
-    // Send WAV header
-    send_wav_header();
-    // Toggle flag so "play function" can directly write to client_socket
-    client_connected = 1;
+    // Send OK and WAV header
+    if (send_http_ok() == 0 && send_wav_header() == 0) {
+      // Toggle flag so "play function" can directly write to client_socket
+      client_connected = 1;
+    }
 
 #if 0
     // Test
     while(!stop_accept_thread)
     { 
-      char buf[256] = {0};
+      char buf[1764] = {0};
       if (tcp_write(client_socket, (char*)&buf, sizeof(buf)) != 0)
       {  
         debug(1, "write failed, closing socket");
 	client_connected = 0;
         break;
       }
+      usleep(10*1000);
     }
 #endif
   };
@@ -287,42 +250,25 @@ void *accept_thread(void *dummy)
 }
 
 static int init(int argc, char **argv) {
-  debug(1, "http init");
-  //  const char *str;
-  //  int value;
-  //  double dvalue;
+  debug(1, "wavstream init");
 
   // set up default values first
-
   config.audio_backend_buffer_desired_length = 1.0;
   config.audio_backend_latency_offset = 0;
 
   // do the "general" audio  options. Note, these options are in the "general" stanza!
   parse_general_audio_options();
-#if 0
   if (config.cfg != NULL) {
-    /* Get the Output Pipename. */
-    const char *str;
-    if (config_lookup_string(config.cfg, "pipe.name", &str)) {
-      pipename = (char *)str;
+    int port;
+    if (config_lookup_int(config.cfg, "http.port", &port)) {
+      wavstream_port = port;
+      debug(1, "http_audio port changed to %d", wavstream_port);
     }
-
-    if ((pipename) && (strcasecmp(pipename, "STDOUT") == 0))
-      die("Can't use \"pipe\" backend for STDOUT. Use the \"stdout\" backend instead.");
+    else {
+      debug(1, "no conf found..");
+    }
   }
 
-  if ((pipename == NULL) && (argc != 1))
-    die("bad or missing argument(s) to pipe");
-
-  if (argc == 1)
-    pipename = strdup(argv[0]);
-
-  // here, create the pipe
-  if (mkfifo(pipename, 0644) && errno != EEXIST)
-    die("Could not create output pipe \"%s\"", pipename);
-
-  debug(1, "Pipename is \"%s\"", pipename);
-#endif
   // Start accept thread
   int ret = pthread_create(&tcp_thread, NULL, &accept_thread, NULL);
 
@@ -332,9 +278,7 @@ static int init(int argc, char **argv) {
 static void deinit(void) {
   void* ret = NULL;
 
-  debug(1, "running deinit for audio_http");
-  if (client_socket)
-    close(client_socket);
+  debug(1, "wavstream deinit");
 
   // Stop the accept thread
   stop_accept_thread = 1;
@@ -343,9 +287,9 @@ static void deinit(void) {
   pthread_join(tcp_thread, &ret);
 }
 
-static void help(void) { printf("    http takes 1 argument: the port of the server to listen on.\n"); }
+static void help(void) { printf("    wavstream takes 1 argument: the port of the server to listen on.\n"); }
 
-audio_output audio_http = {.name = "http",
+audio_output audio_wavstream = {.name = "wavstream",
                            .help = &help,
                            .init = &init,
                            .deinit = &deinit,
