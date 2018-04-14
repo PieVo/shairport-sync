@@ -260,7 +260,7 @@ static int init(int argc, char **argv) {
   parse_general_audio_options();
   if (config.cfg != NULL) {
     int port;
-    if (config_lookup_int(config.cfg, "http.port", &port)) {
+    if (config_lookup_int(config.cfg, "wavstream.port", &port)) {
       wavstream_port = port;
       debug(1, "http_audio port changed to %d", wavstream_port);
     }
